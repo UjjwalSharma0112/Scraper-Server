@@ -1,58 +1,33 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
-import time
-from cookie_loader import load_cookies_from_txt  # if you're using cookie injection
+import pandas as pd
+from jobspy import scrape_jobs
 
+def get_job_links(job_title: str, location: str):
+    jobs = scrape_jobs(
+        site_name=["linkedin"],
+        search_term=job_title,
+        google_search_term=f"{job_title} jobs near {location} since yesterday",
+        location=location,
+        results_wanted=20,
+        hours_old=72,
+        country_indeed='USA',
+        easy_apply=True,
+        linkedin_fetch_description=True,
+    )
 
+    # Select only required columns
+    jobs = jobs[["job_url", "title", "company", "location", "date_posted"]]
 
- 
-def get_job_links_from_linkedin(job_title,location)->list:
-        
-    search_url = f"https://www.linkedin.com/jobs/search/?keywords={job_title}&location={location}&f_AL=true"
+    # Clean and convert
+    jobs = jobs.where(pd.notnull(jobs), None)
+    jobs["date_posted"] = jobs["date_posted"].astype(str)
 
-    # Setup browser
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # Filter out entries with no date_posted or location (optional)
+    jobs = jobs[jobs["date_posted"] != "None"]
+    jobs = jobs[jobs["location"] != ""]
 
-    # Inject cookies
-    driver.get("https://www.linkedin.com")
-    time.sleep(2)
+    # Sort by date_posted descending
+    jobs["date_posted"] = pd.to_datetime(jobs["date_posted"])
+    jobs = jobs.sort_values(by="date_posted", ascending=False)
 
-    for cookie in load_cookies_from_txt("./linkedin_cookies.txt"):
-        try:
-            driver.add_cookie(cookie)
-        except Exception:
-            pass
+    return jobs.to_dict(orient="records")
 
-    # Go to search results
-    driver.get(search_url)
-    time.sleep(4)
-
-    # Scroll to load more jobs
-    for _ in range(3):  # adjust for more results
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
-
-    # Extract job posting links
-    job_links = set()
-
-    job_cards = driver.find_elements(By.CSS_SELECTOR, "a[href*='/jobs/view/']")
-
-    for card in job_cards:
-        href = card.get_attribute("href")
-        if href:
-            job_links.add(href)
-
-    print(f"🔗 Found {len(job_links)} unique job links:\n")
-    
-
-    driver.quit()
-    return list(job_links)
-
-    
